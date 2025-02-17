@@ -1,0 +1,276 @@
+#include "comment_processor_in.h"
+#include "comment_processor_out.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+int row = 1;
+int column = 1;
+int buffer_i = 0;
+
+int enable_mode_conn = FALSE;
+char current_char = '\0';
+char prev_char = '\0';
+enum mode current_mode = NORMAL_MODE;
+enum mode comment_mode = NONE_MODE;
+
+void comment_processor(FILE *source_file, FILE *targe_file) {
+
+	if (source_file == NULL || targe_file == NULL) {
+		printf("Error: In the comment_processor():\n");
+		printf("Argment is null\n");
+	} else {
+		init_file(source_file, targe_file);
+		enum mode prev_mode = current_mode;
+
+		while (1) {
+			buffer_i = 0;
+			char *buffer = create_and_init_buffer(source_file, BUFFER_SIZE);
+
+			if (enable_mode_conn == TRUE) {
+				if (current_mode == PREFIX_COMMENT_MODE) {
+					expect_next_char(buffer[buffer_i], prev_mode, targe_file);
+				} else {
+					hanlde_error("comment_processor", "Don't expect mode");
+				}
+			}
+
+			for (; buffer[buffer_i] != '\0' && buffer[buffer_i] != EOF; buffer_i ++) {
+				update_current_char(buffer, buffer_i);
+				
+
+				update_comment_mode(buffer);
+				if (comment_mode != NONE_MODE) {
+					
+					
+					
+					
+					
+					
+					
+				} else {
+					prev_mode = current_mode;
+					current_mode = update_mode(current_char, prev_mode);
+					
+
+					if (current_mode == PREFIX_COMMENT_MODE) {
+						char next_char = buffer[buffer_i+1];
+						expect_next_char(next_char, prev_mode, targe_file);
+					}
+					else {
+						fputc(current_char, targe_file);
+					}
+				}
+
+				update_row();
+				update_column();
+				prev_char = current_char;
+			}
+
+			if (buffer[buffer_i] == EOF) {
+				free(buffer);
+				break;
+			}
+			prev_mode = buffer[buffer_i-1];
+			free(buffer);
+		}
+	}
+}
+
+enum mode update_mode (char c, enum mode prev_mode) {
+	enum mode ret = NORMAL_MODE;
+
+	switch (c) {
+		case '\'' : {
+			ret = update_char_mode(prev_mode);
+			break;
+		}
+		case '"': {
+			ret = update_str_mode(prev_mode);
+			break;
+		}
+		case '/': {
+			ret = update_prefix_comment_mode(prev_mode);
+			break;
+		}
+		default: ret = prev_mode;
+	}
+
+	return ret;
+}
+enum mode update_str_mode(enum mode prev_mode) {
+	enum mode ret = NORMAL_MODE;
+
+	if (prev_mode == NORMAL_MODE) {
+		ret = STRING_MODE;
+	} else if (prev_mode == CHAR_MODE) {
+		ret = CHAR_MODE;
+	} else if (prev_mode == STRING_MODE) {
+
+		if (prev_char != '\\') {
+			ret = NORMAL_MODE;
+		} else {
+			ret = prev_mode;
+		}
+
+	} else {
+		hanlde_error("update_str_mode", "Don't have in the normal, char, string mode");
+		exit(1);
+	}
+
+	return ret;
+}
+
+enum mode update_char_mode(enum mode prev_mode) {
+	enum mode ret = NORMAL_MODE;
+
+	if (prev_mode == NORMAL_MODE) {
+		ret = CHAR_MODE;
+	} else if (prev_mode == STRING_MODE) {
+		ret = STRING_MODE;
+	} else if(prev_mode == CHAR_MODE) {
+
+		if (prev_char != '\\') {
+			ret = NORMAL_MODE;
+		} else {
+			ret = prev_mode;
+		}
+
+	} else {
+		hanlde_error("update_char_mode", "Don't have normal, char, string mode");
+		exit(1);
+	}
+
+	return ret;
+}
+
+enum mode update_prefix_comment_mode(enum mode prev_mode) {
+	enum mode ret = NORMAL_MODE;
+
+	if (prev_mode == NORMAL_MODE) {
+		ret = PREFIX_COMMENT_MODE;
+	} else if (prev_mode == CHAR_MODE || prev_mode == STRING_MODE) {
+		ret = prev_mode;
+	} else {
+		hanlde_error("update_comment_mode", "Don't have normla, char, string mode");
+		exit(1);
+	}
+
+	return ret;
+}
+
+void update_comment_mode(char *buffer) {
+	if (comment_mode == LINE_COMMENT_MODE && current_char == '\n') {
+		comment_mode = NONE_MODE;
+	} else if (comment_mode == BLOCK_COMMENT_MODE && current_char == '/') {
+		switch (prev_char) {
+			case '*': {
+				comment_mode = NONE_MODE;
+				update_current_char(buffer, ++ buffer_i);
+				break;
+			}
+			default:{
+				printf("char = %c\n", prev_char);
+			}
+			
+		}
+	}
+}
+
+void update_current_char(char *buffer, int index) {
+	current_char = buffer[index];
+}
+
+void update_row() {
+	if (current_char == '\n') {
+		row ++;
+	}
+}
+
+void update_column() {
+	if (current_char == '\n') {
+		column = 1;
+	} else {
+		column ++;
+	}
+}
+
+void hanlde_error(char *error_location, char *message) {
+	printf("Error:In the %s:\n", error_location);
+	printf("In the (%d, %d): mode = %d: char = %c\n", row, column, current_mode, current_char);
+	printf("Message: %s\n", message);
+	exit(1);
+
+}
+
+char* create_and_init_buffer(FILE *file, int buffer_size) {
+	char *buffer = (char*) malloc (buffer_size * sizeof(char) + 1);
+
+	if (buffer == NULL) {
+		hanlde_error("create_and_init_buffer", "Malloc buffer failed");
+	} else {
+		for (int i = 0; i < buffer_size; i ++) {
+			char c = fgetc(file);
+
+			buffer[i] = c;
+
+			if (c == EOF) {
+				break;
+			}
+		}
+		buffer[buffer_size] = '\0';
+	}
+
+	return buffer;
+}
+
+void expect_next_char(char c, enum mode prev_mode, FILE *file) {
+	if (current_mode == PREFIX_COMMENT_MODE) {
+		switch (c) {
+			case '/':{
+				comment_mode = LINE_COMMENT_MODE;
+				current_mode = prev_mode;
+				buffer_i ++;
+				break;
+			}
+			case '*': {
+				comment_mode = BLOCK_COMMENT_MODE;
+				current_mode = prev_mode;
+				buffer_i ++;
+				break;
+			}
+			case '\0':
+			case EOF: {
+				enable_mode_conn = TRUE;
+				break;
+			}
+			default: {
+				fputc('/', file);
+				current_mode = prev_mode;
+			}
+		}
+	} else {
+		hanlde_error("expect_next_char", "current_mode's value is error");
+	}
+
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+}
+
+void init_file (FILE *src, FILE *target) {
+	freopen(NULL, "r", src);
+	freopen(NULL, "w", target);
+}
